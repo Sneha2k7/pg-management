@@ -32,15 +32,35 @@ DB = dict(
 )
 
 # ======================= DATABASE HELPERS =======================
-def conn():
-    return mysql.connector.connect(**DB)
+import threading
 
+_LOCK = threading.Lock()
+
+@st.cache_resource
+def _raw_conn():
+    return mysql.connector.connect(**DB, autocommit=True, connection_timeout=10)
+
+def _use(work):
+    # one shared connection; reconnect once if the cloud database dropped it
+    for attempt in (1, 2):
+        with _LOCK:
+            try:
+                return work(_raw_conn())
+            except (mysql.connector.InterfaceError, mysql.connector.OperationalError):
+                _raw_conn.clear()
+                if attempt == 2:
+                    raise
+
+@st.cache_data(ttl=30, show_spinner=False)
 def fetch(sql, params=()):
-    c = conn(); cur = c.cursor(dictionary=True)
-    cur.execute(sql, params)
-    data, cols = cur.fetchall(), list(cur.column_names)
-    cur.close(); c.close()
-    return data, cols
+    def work(c):
+        cur = c.cursor(dictionary=True)
+        try:
+            cur.execute(sql, params)
+            return cur.fetchall(), list(cur.column_names)
+        finally:
+            cur.close()
+    return _use(work)
 
 def rows(sql, params=()):
     return fetch(sql, params)[0]
@@ -50,14 +70,21 @@ def one(sql):
     return float(v or 0)
 
 def run_many(stmts):
-    c = conn(); cur = c.cursor()
+    def work(c):
+        cur = c.cursor()
+        try:
+            c.start_transaction()
+            for s, p in stmts:
+                cur.execute(s, p)
+            c.commit()
+        except Exception:
+            c.rollback()
+            raise
+        finally:
+            cur.close()
     try:
-        for s, p in stmts:
-            cur.execute(s, p)
-        c.commit()
-        return True
+        _use(work)
     except mysql.connector.Error as e:
-        c.rollback()
         if e.errno == 1062:
             msg = "That value already exists (duplicate email, PAN, ID proof, name, etc.)."
         elif e.errno == 1451:
@@ -72,8 +99,8 @@ def run_many(stmts):
             msg = e.msg
         st.error(msg, icon=":material/error:")
         return False
-    finally:
-        c.close()
+    st.cache_data.clear()
+    return True
 
 def run(sql, params=()):
     return run_many([(sql, params)])
@@ -1247,15 +1274,19 @@ ROLES = ["admin", "manager", "staff"]
 # ======================= ACCOUNTS =======================
 @st.cache_resource
 def ensure_user_table():
-    c = conn(); cur = c.cursor()
-    cur.execute("""create table if not exists app_user (
-                     user_id int auto_increment primary key,
-                     username varchar(30) not null unique,
-                     full_name varchar(100) not null,
-                     password_hash varchar(200) not null,
-                     role varchar(20) not null check (role in ('admin','manager','staff')),
-                     created_on datetime default current_timestamp)""")
-    c.commit(); cur.close(); c.close()
+    def work(c):
+        cur = c.cursor()
+        try:
+            cur.execute("""create table if not exists app_user (
+                             user_id int auto_increment primary key,
+                             username varchar(30) not null unique,
+                             full_name varchar(100) not null,
+                             password_hash varchar(200) not null,
+                             role varchar(20) not null check (role in ('admin','manager','staff')),
+                             created_on datetime default current_timestamp)""")
+        finally:
+            cur.close()
+    _use(work)
     return True
 
 def hash_pw(pw, salt=None):
