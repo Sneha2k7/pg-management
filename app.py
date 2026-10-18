@@ -253,7 +253,7 @@ def dashboard_page():
     if pending > 0:
         bits.append(f"{inr(pending)} rent to collect")
     headline = "You have " + " and ".join(bits) if bits else "Everything is running smoothly"
-    ui(f'<div class="greet"><div class="hi">{hello}   , {esc(T(st.session_state["user"]["name"]))}</div><div class="big">{headline}</div>'
+    ui(f'<div class="greet"><div class="hi">{hello}, {esc(T(st.session_state["user"]["name"]))}</div><div class="big">{headline}</div>'
        f'<div class="sub">{tenants} active tenant{"s" if tenants != 1 else ""} &nbsp;·&nbsp; '
        f'{avail} unit{"s" if avail != 1 else ""} available &nbsp;·&nbsp; '
        f'{props} propert{"y" if props == 1 else "ies"}</div></div>')
@@ -1110,7 +1110,20 @@ st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 .stApp, h1, h2, h3, h4, p, label, button, input, textarea, td, th { font-family: 'Plus Jakarta Sans', 'Segoe UI', sans-serif; }
 .stApp { background: #ECEAE4; }
-[data-testid="stHeader"] { background: transparent; }
+   [data-testid="stHeader"] { background: linear-gradient(90deg, #ECEAE4 calc(100% - 420px), transparent calc(100% - 420px)) !important; box-shadow: 0 1px 0 #DDE0D9; z-index: 999; }
+   [data-testid="stStatusWidget"] { display: none !important; }
+   div[data-stale="true"] { opacity: 1 !important; transition: none !important; }
+   .stApp[data-teststate="running"] [data-testid="stHeader"]::after { content: ""; position: absolute; left: 0; bottom: 0; height: 3px; width: 100%; background: linear-gradient(90deg, #2F5D46, #2F5D46) no-repeat; background-size: 35% 100%; animation: loadbar 1.1s ease-in-out infinite; }
+   [data-testid="stToolbarActions"], [data-testid="stMainMenu"], [data-testid="stAppDeployButton"], [data-testid="stStatusWidget"] { display: none !important; }
+   .st-key-userbar { position: fixed; top: 0; right: 0; height: 60px; min-width: 420px; justify-content: flex-end; padding: 0 28px; background: #ECEAE4; box-shadow: 0 1px 0 #DDE0D9; z-index: 1000001 !important; flex-direction: row !important; align-items: center; gap: 14px !important; width: auto !important; }
+   .st-key-userbar > div { width: auto !important; }
+   .st-key-userbar .userbar { white-space: nowrap; }
+   .st-key-userbar [data-testid="stBaseButton-secondary"] { padding: .25rem 1.2rem; min-height: 2.2rem; }
+   @media (max-width: 900px) { .st-key-userbar { position: static; height: auto; min-width: 0; padding: 0; box-shadow: none; } [data-testid="stHeader"] { background: #ECEAE4 !important; } }
+   [data-testid="stHeader"] { background: #ECEAE4 !important; }
+   .block-container { padding-top: 4.6rem !important; }
+   .st-key-userbar { position: static !important; height: auto !important; min-width: 0 !important; width: 100% !important; padding: 0 !important; background: transparent !important; box-shadow: none !important; justify-content: flex-end !important; margin: 0 0 8px !important; }
+   @keyframes loadbar { from { background-position: -40% 0; } to { background-position: 140% 0; } }
 [data-testid="stAppDeployButton"], .stDeployButton, #MainMenu, footer { display: none !important; }
 .block-container { max-width: 1280px; padding-top: 2.4rem; padding-bottom: 4rem; }
 h1, h2, h3 { color: #1D2B24 !important; font-weight: 800 !important; letter-spacing: -0.02em; }
@@ -1381,7 +1394,8 @@ def login_gate():
     st.stop()
 
 login_gate()
-# ======================= SIGNED-IN BAR + WELCOME TRANSITION =======================
+
+# ======================= WELCOME TRANSITION =======================
 WELCOME_CSS = """
 <style>
 .welcome { position: fixed; inset: 0; z-index: 99999; background: #ECEAE4; display: flex; flex-direction: column;
@@ -1397,21 +1411,27 @@ WELCOME_CSS = """
 </style>
 """
 
-def user_bar():
-    u = st.session_state["user"]
+def show_welcome():
     if st.session_state.pop("welcome", False):
+        u = st.session_state["user"]
         st.markdown(WELCOME_CSS, unsafe_allow_html=True)
         ui(f'<div class="welcome"><div class="wm">{AUTH_ICON}</div>'
            f'<div class="wh">Welcome, {esc(T(u["name"]))}</div>'
            f'<div class="ws">Signed in as {esc(S(u["role"]))}</div></div>')
-    _, mid, btn = st.columns([4, 3, 1.2], vertical_alignment="center")
-    mid.markdown(f'<div class="userbar">Signed in as <b>{esc(T(u["name"]))}</b> &nbsp; '
-                 f'<span class="chip info">{esc(S(u["role"]))}</span></div>', unsafe_allow_html=True)
-    if btn.button("Sign out", key="signout"):
+
+# ======================= ACCOUNT PAGE =======================
+def account_page():
+    u = st.session_state["user"]
+    head("Account", "Your sign-in details")
+    ui(f'<div class="card" style="max-width:520px"><div class="row">'
+       f'<div class="avatar">{initials(u["name"])}</div>'
+       f'<div class="main"><div class="t">{esc(T(u["name"]))}</div>'
+       f'<div class="s">Username: {esc(u["username"])}</div></div>'
+       f'<span class="chip info">{esc(S(u["role"]))}</span></div></div>')
+    st.write("")
+    if st.button("Sign out", key="signout"):
         st.session_state.pop("user", None)
         st.rerun()
-
-user_bar()
 
 # ======================= NAVIGATION (by role) =======================
 MENU = {
@@ -1437,13 +1457,27 @@ ACCESS = {
     "staff": {"dashboard", "tenants", "complaints", "visitors"},
 }
 
-allowed = ACCESS[st.session_state["user"]["role"]]
+me = st.session_state["user"]
+allowed = ACCESS[me["role"]]
 pages = {}
+dash_page = None
 for group, items in MENU.items():
-    group_pages = [st.Page(fn, title=title, icon=icon, default=(key == "dashboard"))
-                   for key, fn, title, icon in items if allowed is None or key in allowed]
+    group_pages = []
+    for key, fn, title, icon in items:
+        if allowed is None or key in allowed:
+            p = st.Page(fn, title=title, icon=icon, default=(key == "dashboard"))
+            if key == "dashboard":
+                dash_page = p
+            group_pages.append(p)
     if group_pages:
         pages[group] = group_pages
 
+first_name = T(me["name"]).split(" ")[0]
+pages[f"{first_name} · {S(me['role'])}"] = [
+    st.Page(account_page, title="Account", icon=":material/account_circle:")]
+
 pg = st.navigation(pages, position="top")
+if st.session_state.get("welcome") and pg.title != "Dashboard":
+    st.switch_page(dash_page)
+show_welcome()
 pg.run()
