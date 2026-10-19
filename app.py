@@ -38,7 +38,7 @@ _LOCK = threading.Lock()
 
 @st.cache_resource
 def _raw_conn():
-    return mysql.connector.connect(**DB, autocommit=True, connection_timeout=10)
+    return mysql.connector.connect(use_pure=True,**DB, autocommit=True, connection_timeout=10)
 
 def _use(work):
     # one shared connection; reconnect once if the cloud database dropped it
